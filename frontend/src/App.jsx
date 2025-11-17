@@ -2,8 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { TrendingUp, TrendingDown, DollarSign, Activity, BarChart3 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-const API_URL = 'http://localhost:8080';
-const WS_URL = 'ws://localhost:8080/ws';
+// const API_URL = 'http://localhost:8080';
+// const WS_URL = 'ws://localhost:8080/ws';
+// for AWS 
+const API_URL = 'http://51.21.219.168:8080';
+const WS_URL = 'ws://51.21.219.168:8080/ws';
 
 export default function TradingDashboard() {
   const [prices, setPrices] = useState({});

@@ -1,14 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { TrendingUp, TrendingDown, DollarSign, Activity, BarChart3 } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Activity, BarChart3, LogOut, User } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-// const API_URL = 'http://localhost:8080';
-// const WS_URL = 'ws://localhost:8080/ws';
-// for AWS 
-const API_URL = 'http://51.21.219.168:8080';
-const WS_URL = 'ws://51.21.219.168:8080/ws';
+const API_URL = 'http://localhost:8080/api';
+const WS_URL = 'ws://localhost:8080/ws';
+// const API_URL = 'http://51.21.219.168:8080';
+// const WS_URL = 'ws://51.21.219.168:8080/ws';
 
 export default function TradingDashboard() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [token, setToken] = useState(localStorage.getItem('token') || '');
+  const [username, setUsername] = useState(localStorage.getItem('username') || '');
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [authError, setAuthError] = useState('');
+
   const [prices, setPrices] = useState({});
   const [orders, setOrders] = useState([]);
   const [orderForm, setOrderForm] = useState({
@@ -22,34 +28,42 @@ export default function TradingDashboard() {
   const [priceHistory, setPriceHistory] = useState({});
   const [selectedChart, setSelectedChart] = useState('AAPL');
   const wsRef = useRef(null);
-  const previousPricesRef = useRef({});
+
+  // Check authentication on mount
+  useEffect(() => {
+    if (token) {
+      setIsAuthenticated(true);
+    }
+  }, []);
 
   // WebSocket connection
   useEffect(() => {
     connectWebSocket();
-    fetchOrders();
+    if (isAuthenticated) {
+      fetchOrders();
+    }
 
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
       }
     };
-  }, []);
+  }, [isAuthenticated]);
 
   const connectWebSocket = () => {
     const ws = new WebSocket(WS_URL);
     
     ws.onopen = () => {
       setWsStatus('connected');
-      showNotification('Connected to market data', 'success');
+      if (isAuthenticated) {
+        showNotification('Connected to market data', 'success');
+      }
     };
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      previousPricesRef.current = { ...prices };
       setPrices(data);
       
-      // Update price history for charts
       const timestamp = new Date().toLocaleTimeString();
       setPriceHistory(prev => {
         const updated = { ...prev };
@@ -58,7 +72,7 @@ export default function TradingDashboard() {
             updated[symbol] = [];
           }
           updated[symbol] = [
-            ...updated[symbol].slice(-29), // Keep last 30 data points
+            ...updated[symbol].slice(-29),
             {
               time: timestamp,
               price: data[symbol].price,
@@ -72,7 +86,6 @@ export default function TradingDashboard() {
 
     ws.onerror = () => {
       setWsStatus('error');
-      showNotification('WebSocket error', 'error');
     };
 
     ws.onclose = () => {
@@ -83,9 +96,55 @@ export default function TradingDashboard() {
     wsRef.current = ws;
   };
 
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+
+    try {
+      const endpoint = isRegistering ? '/register' : '/login';
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(loginForm)
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setToken(data.token);
+        setUsername(data.username);
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('username', data.username);
+        setIsAuthenticated(true);
+        showNotification(data.message, 'success');
+        setLoginForm({ username: '', password: '' });
+      } else {
+        setAuthError(data.error || 'Authentication failed');
+      }
+    } catch (error) {
+      setAuthError('Network error. Please try again.');
+    }
+  };
+
+  const handleLogout = () => {
+    setToken('');
+    setUsername('');
+    localStorage.removeItem('token');
+    localStorage.removeItem('username');
+    setIsAuthenticated(false);
+    setOrders([]);
+    showNotification('Logged out successfully', 'success');
+  };
+
   const fetchOrders = async () => {
     try {
-      const response = await fetch(`${API_URL}/orders`);
+      const response = await fetch(`${API_URL}/orders`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
       const data = await response.json();
       setOrders(data || []);
     } catch (error) {
@@ -94,11 +153,17 @@ export default function TradingDashboard() {
   };
 
   const handleSubmitOrder = async () => {
+    if (!isAuthenticated) {
+      showNotification('Please login to place orders', 'error');
+      return;
+    }
+
     try {
       const response = await fetch(`${API_URL}/orders`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
           ...orderForm,
@@ -118,7 +183,8 @@ export default function TradingDashboard() {
           price: prices[orderForm.symbol]?.price || 0
         });
       } else {
-        showNotification('Failed to place order', 'error');
+        const error = await response.json();
+        showNotification(error.error || 'Failed to place order', 'error');
       }
     } catch (error) {
       showNotification('Error placing order', 'error');
@@ -170,6 +236,79 @@ export default function TradingDashboard() {
     return null;
   };
 
+  // Login/Register Screen
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-6">
+        <div className="bg-slate-800/50 backdrop-blur rounded-lg border border-slate-700 p-8 w-full max-w-md">
+          <div className="flex items-center justify-center mb-6">
+            <Activity className="w-10 h-10 text-blue-400 mr-3" />
+            <h1 className="text-2xl font-bold text-white">Trading Dashboard</h1>
+          </div>
+
+          <h2 className="text-xl text-white mb-6 text-center">
+            {isRegistering ? 'Create Account' : 'Welcome Back'}
+          </h2>
+
+          {authError && (
+            <div className="mb-4 p-3 bg-red-500/20 border border-red-500 rounded-lg">
+              <p className="text-red-400 text-sm">{authError}</p>
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-400 mb-2">Username</label>
+              <input
+                type="text"
+                value={loginForm.username}
+                onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
+                className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter username"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-400 mb-2">Password</label>
+              <input
+                type="password"
+                value={loginForm.password}
+                onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter password"
+              />
+            </div>
+
+            <button
+              onClick={handleLogin}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors"
+            >
+              {isRegistering ? 'Register' : 'Login'}
+            </button>
+
+            <button
+              onClick={() => {
+                setIsRegistering(!isRegistering);
+                setAuthError('');
+              }}
+              className="w-full text-blue-400 hover:text-blue-300 text-sm"
+            >
+              {isRegistering ? 'Already have an account? Login' : "Don't have an account? Register"}
+            </button>
+          </div>
+
+          <div className="mt-6 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+            <p className="text-blue-400 text-sm text-center">
+              <strong>Demo Account:</strong><br />
+              Username: demo | Password: demo123
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Main Dashboard
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6">
       <div className="max-w-7xl mx-auto">
@@ -180,12 +319,25 @@ export default function TradingDashboard() {
               <Activity className="w-8 h-8 text-blue-400" />
               <h1 className="text-3xl font-bold text-white">Trading Dashboard</h1>
             </div>
-            <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${
-                wsStatus === 'connected' ? 'bg-green-500' : 
-                wsStatus === 'connecting' ? 'bg-yellow-500' : 'bg-red-500'
-              } animate-pulse`}></div>
-              <span className="text-sm text-gray-400 capitalize">{wsStatus}</span>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${
+                  wsStatus === 'connected' ? 'bg-green-500' : 
+                  wsStatus === 'connecting' ? 'bg-yellow-500' : 'bg-red-500'
+                } animate-pulse`}></div>
+                <span className="text-sm text-gray-400 capitalize">{wsStatus}</span>
+              </div>
+              <div className="flex items-center gap-2 bg-slate-800/50 px-4 py-2 rounded-lg">
+                <User className="w-4 h-4 text-blue-400" />
+                <span className="text-white">{username}</span>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg text-white transition-colors"
+              >
+                <LogOut className="w-4 h-4" />
+                Logout
+              </button>
             </div>
           </div>
         </div>
@@ -376,7 +528,7 @@ export default function TradingDashboard() {
         {/* Orders Table */}
         <div className="bg-slate-800/50 backdrop-blur rounded-lg border border-slate-700 overflow-hidden">
           <div className="p-4 border-b border-slate-700">
-            <h2 className="text-xl font-semibold text-white">Order History</h2>
+            <h2 className="text-xl font-semibold text-white">My Orders</h2>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">

@@ -1,0 +1,6 @@
+ 
+
+
+ssh -i "C:\Users\vidya\OneDrive\Desktop\aws\test_key.pem" ec2-user@51.21.219.168
+
+http://51.21.219.168/
